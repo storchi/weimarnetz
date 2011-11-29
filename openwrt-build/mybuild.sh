@@ -17,6 +17,7 @@ Usage:	$me gitpull
 	$me set_build_kernelconfig
 	$me applymystuff <profile> <subprofile> <nodenumber>	# e.g. "ffweimar" "adhoc" "42"
 	$me make <option>
+	$me build_kalua_update_tarball
 EOF
 }
 
@@ -84,6 +85,21 @@ uptime_in_seconds()
 	cut -d'.' -f1 /proc/uptime
 }
 
+build_kalua_update_tarball()
+{
+	local mydir="$( pwd )"
+	local tarball="/tmp/tarball.tgz"
+
+	cd kalua/openwrt-addons/
+	tar --owner=root --group=root -czf "$tarball" .
+	cd $mydir
+
+	echo "wrote: '$tarball' size: $( filesize "$tarball" ) bytes"
+	echo "to copy this to your device, use ON the device:"
+	echo
+	echo "scp $USER@$( mypubip ):$tarball $tarball; cd /; tar xvzf $tarball; regen"
+}
+
 config2git()
 {
 	local hardware destfile arch dir
@@ -129,6 +145,7 @@ get_hardware()
 mymake()
 {
 	local option="$1"			# e.g. V=99
+	local cpu_count="$( grep -c ^processor /proc/cpuinfo )"
 	local t1 t2 date1 date2 hardware
 	local filelist file
 
@@ -157,15 +174,17 @@ mymake()
 		[ -e "$file" ] && rm "$file"
 	} done
 
-	#
+
+	option="-j$(( $cpu_count + 1 ))${option:+ }$option"	# http://www.timocharis.com/help/jn.html
+	echo "executing: 'make $option'"
 	make $option || return 1
-	#
+
 
 	t2="$( uptime_in_seconds )"
 	date2="$( date )"
 	echo "start: $date1"
 	echo "ready: $date2"
-	echo "make lasts $(( $t2 - $t1 )) seconds (~$(( ($t2 - $t1) / 60 )) min) for your '$hardware' (arch: $( get_arch ))"
+	echo "'make $option' lasts $(( $t2 - $t1 )) seconds (~$(( ($t2 - $t1) / 60 )) min) for your '$hardware' (arch: $( get_arch ))"
 	echo
 	echo '"Jauchzet und frohlocket..." ob der Bytes die erschaffen wurden:'
 	echo
@@ -483,8 +502,26 @@ apply_tarball_regdb_and_applyprofile()
 	esac
 }
 
+svnrev2githash()
+{
+	local revision="$1"
+
+	git log --grep="svn://svn.openwrt.org/openwrt/trunk@$revision " |
+	 grep ^commit |
+	  cut -d' ' -f2
+}
+
 gitpull()
 {
+	local revision="$1"
+	local hash
+
+	[ -n "$revision" ] && {
+		hash="$( svnrev2githash "$revision" )"
+		echo "githash: '$hash'"
+		return 0
+	}
+
 	log "updating package-feeds"
 	cd ../packages
 	git pull
